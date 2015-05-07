@@ -1,9 +1,0 @@
-{
-    "host": "smtp.alibaba-inc.com",
-    "secure": true,
-    "debug": true,
-    "auth": {
-        "user": "wb-dingxinghua@alibaba-inc.com",
-        "pass": "password"
-    }
-}

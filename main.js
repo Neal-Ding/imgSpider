@@ -4,16 +4,11 @@ var https = require('https'),
 	fs = require('graceful-fs'),
 	util = require('util'),
 	iconv = require('iconv-lite'),
-	nodemailer = require('nodemailer');
+	nodemailer = require('nodemailer'),
+	config = require('./config.json'),
+	counter = 0;
 
-var config = {
-	urlPath: './url.txt',						//列表文件路径
-	path: './cms',								//文件夹路径
-	fileType: '.vm',							//指定类型读取
-	count: 0,									//异步标记记数器
-	logPath: './log.xls',						//生成日志目录
-	mailConfig: require('./mail-config.json'),	//邮件发送设置
-};
+var fileArr = [];
 
 /**
  * 遍历文件夹
@@ -83,12 +78,12 @@ function handleFile (data, filePath, code, callback) {
 		else{
 			t = t[0];
 		}
-		++config.count;			//日志内容加1
+		++counter;			//日志内容加1
 		callback && callback(t, filePath, setLog, false);
 	});
 	srcURL.forEach(function (t) {
 		t = t.slice(9, -1);
-		++config.count;			//日志内容加1
+		++counter;			//日志内容加1
 		callback && callback(t, filePath, setLog, false);
 	});
 	cssURL.forEach(function (t) {
@@ -159,6 +154,7 @@ function logInit () {
 		dir: '文件路径',
 		status: '图片状态'
 	});
+	fileArr.push(item);
 	fs.writeFile(config.logPath, item, {encoding: 'utf8', flag: 'w'}, function (err) {
 		err && console.log(err);
 		console.log('logInit Success');
@@ -182,24 +178,51 @@ function setLog (URL, file, filePath, status) {
 	});
 	// console.log(item);
 	if(file.length && file.length > 0){
+		fileArr.push(item);
 		fs.writeFile(config.logPath, item, {encoding: 'utf8', flag: 'a'}, function (err) {
 			if (err) {
 				console.log('setLog ' + err.message);
 			}
 			else{
-				--config.count;			//日志内容加1
-				// console.log(config.count + ' Saved! ' + item);
-				if(config.count === 0) {
-					sendMail(function () {
-						process.exit();
-					});
+				--counter;			//日志内容加1
+				console.log(counter + ' Saved! ' + item);
+				if(counter === 0) {
+					sortMax(function () {
+						sendMail(function () {
+							process.exit();
+						});
+					})
 				}
 			}
 		});
 	}
 	else{
-		--config.count;			//日志内容加1
+		--counter;			//日志内容加1
 	}
+}
+
+function sortMax (callback) {
+
+			
+	var newData = fileArr.sort(function (n1, n2) {
+		var n1 = +n1.split('\t')[1];
+			n2 = +n2.split('\t')[1];
+
+		if((isNaN(n1) || isNaN(n2)) == false){
+			// console.log(n1, n2)
+			return n2 - n1;
+		}			
+	}).join('\r\n');
+	// console.log(newData)
+	fs.writeFile(config.logPath, newData, {encoding: 'utf8', flag: 'w+'}, function (err) {
+		if (err) {
+			console.log('sort ' + err.message);
+		}
+		else{
+			console.log('sort done!');
+			callback && callback();
+		}
+	});
 }
 
 function sendMail (callback) {
@@ -207,7 +230,7 @@ function sendMail (callback) {
 
 	transporter.sendMail({
 		from: config.mailConfig.auth.user,
-		to: commander.mail,
+		to: config.mailTo,
 		subject: 'hello',
 		html: '<p style="color: red;">33333</p>',
 		attachments: [
@@ -227,5 +250,7 @@ function htmlTemplate (data) {
 }
 
 logInit();
-getFromDictionary (config.path, handleFile);		//以目录获取Log
-// getFromListFile (config.urlPath, handleFile);		//以URL列表读取
+// getFromDictionary (config.path, handleFile);		//以目录获取Log
+getFromListFile (config.urlPath, handleFile);		//以URL列表读取
+
+// sortMax();
