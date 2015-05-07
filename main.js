@@ -189,7 +189,7 @@ function setLog (URL, file, filePath, status) {
 				if(counter === 0) {
 					sortMax(function () {
 						sendMail(function () {
-							process.exit();
+							// process.exit();
 						});
 					})
 				}
@@ -203,7 +203,7 @@ function setLog (URL, file, filePath, status) {
 
 function sortMax (callback) {
 
-			
+
 	var newData = fileArr.sort(function (n1, n2) {
 		var n1 = +n1.split('\t')[1];
 			n2 = +n2.split('\t')[1];
@@ -211,7 +211,7 @@ function sortMax (callback) {
 		if((isNaN(n1) || isNaN(n2)) == false){
 			// console.log(n1, n2)
 			return n2 - n1;
-		}			
+		}
 	}).join('\r\n');
 	// console.log(newData)
 	fs.writeFile(config.logPath, newData, {encoding: 'utf8', flag: 'w+'}, function (err) {
@@ -250,7 +250,8 @@ function htmlTemplate (data) {
 }
 
 logInit();
-// getFromDictionary (config.path, handleFile);		//以目录获取Log
-getFromListFile (config.urlPath, handleFile);		//以URL列表读取
+
+getFromDictionary (config.folderPath, handleFile);		//以目录获取Log
+// getFromListFile (config.urlPath, handleFile);		//以URL列表读取
 
 // sortMax();

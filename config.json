@@ -1,9 +1,9 @@
 {
-	"urlPath": "./url.txt",					
-	"filePath": "./cms",							
-	"fileType": ".vm",							
-	"logPath": "./log.xls",						
-	"mailConfig": {								
+	"urlPath": "./url.txt",
+	"folderPath": "./cms",
+	"fileType": ".vm",
+	"logPath": "./log.xls",
+	"mailConfig": {
 		"host": "smtp.alibaba-inc.com",
 		"secure": true,
 		"debug": true,

@@ -28,6 +28,12 @@ $RECYCLE.BIN/
 # Thumbnails
 ._*
 
+# privateFile
+cms/
+url.*
+*.xls
+*.zip
+
 # Files that might appear on external disk
 .Spotlight-V100
 .Trashes
