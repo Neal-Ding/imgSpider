@@ -8,18 +8,25 @@ var https = require('https'),
 	config = require('./config.json'),
 	counter = 0;
 
+var counter = {
+	allFileFolder: 0,
+	file: 0,
+	folder: 0,
+	all
+
+}
 
 /**
  * 遍历文件夹
  * @param  {String}   filePath 文件路径
  * @param  {Function} callback 文件回调处理
  */
-function getFromDictionary (filePath, callback) {
+function getFromDictionary (filePath) {
 	fs.readdir(filePath, function (err, file) {
 		file.forEach(function (t, idx) {
 			fs.stat(filePath + '/' + t, function (err, stats) {
 				if (stats.isDirectory()) {
-					getFromDictionary(filePath + '/' + t, callback);
+					getFromDictionary(filePath + '/' + t);
 				}
 				else if(stats.isFile() && path.extname(t) === config.fileType){
 					fs.readFile(filePath + '/' + t, function (err, data) {
@@ -183,11 +190,7 @@ function setLog (URL, file, filePath, status) {
 				--counter;			//日志内容加1
 				console.log(counter + ' Saved! ' + item);
 				if(counter === 0) {
-					sortMax(function () {
-						sendMail(function () {
-							process.exit();
-						});
-					})
+					nextStep();
 				}
 			}
 		});
@@ -197,11 +200,11 @@ function setLog (URL, file, filePath, status) {
 	}
 }
 
-function sortMax (callback) {
+function sortMax () {
 	fs.readFile(config.logPath, {encoding: 'utf8'}, function (err, data) {
 		var data = data.split('\r\n');
 		data[0] = '\ufeff' + data[0];
-		data.pop();
+		data.pop();								//去结尾空行
 		data = data.sort(function (n1, n2) {
 			var n1 = +n1.split('\t')[1];
 				n2 = +n2.split('\t')[1];
@@ -210,20 +213,19 @@ function sortMax (callback) {
 				return n2 - n1;
 			}
 		}).join('\r\n');
-		// console.log(data);
 		fs.writeFile(config.logPath, data, {encoding: 'ucs2', flag: 'w+'}, function (err) {
 			if (err) {
 				console.log('sort ' + err.message);
 			}
 			else{
 				console.log('sort done!');
-				callback && callback();
+				nextStep();
 			}
 		});
 	});
 }
 
-function sendMail (callback) {
+function sendMail () {
 	var transporter = nodemailer.createTransport(config.mailConfig);
 
 	transporter.sendMail({
@@ -233,12 +235,11 @@ function sendMail (callback) {
 		html: '<p style="color: red;">33333</p>',
 		attachments: [
 			{
-				// utf-8 string as an attachment
-				path: './log.xls'
+				path: config.logPath
 			}
 		]
 	},function () {
-		callback && callback();
+		nextStep();
 	});
 }
 
@@ -247,9 +248,52 @@ function htmlTemplate (data) {
 	return data.link + '\t' + data.size + '\t' + data.dir + '\t' + data.status + '\r\n';
 }
 
+function nextStep (data, branch) {
+	var data = data || null,
+		name = arguments.callee.caller.name,
+		branch = branch || 'default';
+
+	taskProcess[name][branch].apply(this, data)
+}
+
 logInit();
 
 // getFromDictionary (config.folderPath, handleFile);		//以目录获取Log
 getFromListFile (config.urlPath, handleFile);		//以URL列表读取
 
 // sortMax();
+
+var taskProcess = {
+	'init': {
+		'isList': getFromListFile,
+		'isDirectory': getFromDictionary,
+		'default': getFromDictionary
+	},
+	'getFromListFile': {
+		'default': handleFile
+	},
+	'getFromDictionary': {
+		'default': handleFile
+	},
+	'handleFile': {
+		'isCss': handleFile,
+		'default': imgFilter
+	},
+	'imgFilter': {
+		'isDataURL': setLog,
+		'isURL': getImg,
+		'default': setLog
+	},
+	'getImg': {
+		'default': setLog
+	},
+	'setLog': {
+		'default': sortMax
+	},
+	'sortMax': {
+		'default': sendMail
+	},
+	'sendMail': {
+		'default': exit
+	}
+}
