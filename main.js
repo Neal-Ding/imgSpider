@@ -8,33 +8,37 @@ var https = require('https'),
 	config = require('./config.json'),
 	counter = 0;
 
-var counter = {
-	allFileFolder: 0,
-	file: 0,
-	folder: 0,
-	all
-
-}
-
 /**
- * 遍历文件夹
- * @param  {String}   filePath 文件路径
- * @param  {Function} callback 文件回调处理
+ * 遍历源文件夹并读取指定类型文件
+ * @param  {String}   directory		源文件夹
+ * @nData  {String}   fileData		文件内容
+ * @nData  {String}   sourcePath	文件路径	
+ * @nData  {String}   encode		文件编码
  */
-function getFromDictionary (filePath) {
-	fs.readdir(filePath, function (err, file) {
+function getFromDirectory (data) {
+	var nextObj = new createNextObj();
+	var directory = data.directory || config.folderPath;
+	fs.readdir(directory, function (err, file) {
 		file.forEach(function (t, idx) {
-			fs.stat(filePath + '/' + t, function (err, stats) {
+			var filePath = directory + '/' + t;
+			fs.stat(filePath, function (err, stats) {
 				if (stats.isDirectory()) {
-					getFromDictionary(filePath + '/' + t);
+					getFromDirectory({
+						directory: filePath
+					});
 				}
-				else if(stats.isFile() && path.extname(t) === config.fileType){
-					fs.readFile(filePath + '/' + t, function (err, data) {
+				else if(stats.isFile() && path.extname(t) === config.fileType){		//todo multiExtName
+					fs.readFile(filePath, function (err, data) {
 						if(err){
 							console.log(err);
 						}
 						else{
-							callback && callback(data, filePath + '/' + t, 'gbk', getFile);
+							nextObj.setData({
+								fileData: data,
+								filePath: filePath,
+								encode: 'gbk'
+							});
+							nextObj.go();
 						}
 					});
 				}
@@ -48,15 +52,19 @@ function getFromDictionary (filePath) {
  * @param  {[type]}   filePath 文件路径
  * @param  {Function} callback [description]
  */
-function getFromListFile (filePath, callback) {
-	fs.readFile(filePath, {encoding: 'utf8'}, function (err, data) {
+function getFromListFile (data) {
+	var nextObj = new createNextObj();
+	fs.readFile(config.urlPath, {encoding: 'utf8'}, function (err, data) {
 		if (err) {
 			console.log(err);
 		} else{
-			data.split('\r\n').forEach(function (t) {	//换行字符问题
-				getFile(t, t, function (URL, file, filePath) {
-					callback && callback(file, filePath, 'utf8', getFile)
+			data.split('\r\n').forEach(function (t) {
+				nextObj.setData({
+					URL: t,
+					filePath: t,
+					encode: 'utf8'
 				});
+				nextObj.go();
 			});
 		}
 	});
@@ -69,11 +77,12 @@ function getFromListFile (filePath, callback) {
  * @param  {String}   code	 编码方式
  * @param  {Function} callback 回调
  */
-function handleFile (data, filePath, code, callback) {
-	data = iconv.decode(data, code);
-	var srcURL = data.match(/img src=[\"|\'](.?)[\"|\']/gi) || [],
-		bgURL = data.match(/url\((.+?)\)/gi) || [],
-		cssURL = data.match(/href=[\"|\'](.+?)\.css[\"|\']/gi) || [];
+function extractImageURL (data) {
+	var nextObj = new createNextObj();
+	var content = iconv.decode(data.fileData, data.encode);
+	var srcURL = content.match(/img src=(\"|\')(.+?)(\"|\')/gi) || [],
+		bgURL = content.match(/url\((.+?)\)/gi) || [],
+		cssURL = content.match(/href=[\"|\'](.+?)\.css[\"|\']/gi) || [];
 
 	bgURL.forEach(function (t) {
 		t = t.slice(4, -1).split(/[\"|\']/);
@@ -84,84 +93,130 @@ function handleFile (data, filePath, code, callback) {
 			t = t[0];
 		}
 		++counter;			//日志内容加1
-		callback && callback(t, filePath, setLog, false);
+		nextObj.setData({
+			URL: t,
+			filePath: data.filePath
+		});
+		nextObj.go();
 	});
 	srcURL.forEach(function (t) {
 		t = t.slice(9, -1);
 		++counter;			//日志内容加1
-		callback && callback(t, filePath, setLog, false);
+		nextObj.setData({
+			URL: t,
+			filePath: data.filePath
+		});
+		nextObj.go();
 	});
 	cssURL.forEach(function (t) {
 		t = t.slice(6, -1);
-		callback && callback(t, filePath + ' --> ' + t, function (URL, file, filePath) {
-			// console.log(URL, file)
-			handleFile(file, filePath, 'utf8', callback);
+		nextObj.setData({
+			URL: t,
+			filePath: data.filePath,
+			type: 'css'
 		});
+		nextObj.go();
 	});
 }
 
 /**
- * 针对指定链接获取文件内容
+ * 根据链接分发请求
  * @param  {String} URL	  文件链接
  * @param  {String} filePath 来自文件路径
  */
-function getFile (URL, filePath, callback, isCss) {
+function urlAssign (data) {
+	var nextObj = new createNextObj();
+	var	protocol = data.URL.match(/(https|http|data)(.?)\:/gi) || [''];
+
+	protocol = protocol[0].split(':')[0];
+
+	if(protocol === 'data') {		//统计dataURL有bug,前后引号一致
+		var fileName = data.URL.slice(0, 15) + '...' + data.URL.slice(-15);
+		nextObj.setData({
+			fileName: fileName,
+			fileData: data.URL,
+			filePath: data.filePath,
+			status: 'success'
+		});
+		nextObj.setBranch('isDataURL');
+	}
+	else if(protocol.length > 0){
+		nextObj.setData({
+			protocol: protocol,
+			URL: data.URL,
+			filePath: data.filePath,
+			type: data.type
+		});
+		nextObj.setBranch('isURL');
+	}
+	else {
+		nextObj.setData({
+			fileName: data.URL,
+			fileData: data.URL,
+			filePath: data.filePath,
+			status: 'UnKnow'
+		});
+		nextObj.setBranch('isDataURL');
+	}
+	nextObj.go();
+}
+
+function getFile (data) {
+	var nextObj = new createNextObj();
 	var bufferArr = [],
 		bufferLen = 0,
 		file = new Buffer(0),
-		protocol = URL.match(/[http|https|data](.+?)\:/gi) || [];
+		protocol = data.protocol,
+		status;
 
-	switch (protocol[0]) {
-		case 'http:':
-			protocol = http;
-			break;
-		case 'https:':
-			protocol = https;
-			break;
-		case 'data:':
-			protocol = 'data';
-			break;
-		default:
-			protocol = null;
-			break;
-	}
+	protocol = (protocol === 'http') ? http : 
+		(protocol === 'https') ? https : null;
 
-	if(protocol === 'data') {		//统计dataURL有bug
-		var fileName = URL.slice(0, 15) + '...' + URL.slice(-15);
-		callback && callback(fileName, URL, filePath, "success");
-	}
-	else if(protocol){
-		protocol.get(URL, function (res) {
-			res.on('data', function (data) {
-				if ((res.statusCode >= 200 && res.statusCode < 300) || res.statusCode === 304) {
-					bufferArr.push(data);
-					bufferLen += data.length;
-				}
-			});
-			res.on('end', function () {
-				file = Buffer.concat(bufferArr, bufferLen);
-				callback && callback(URL, file, filePath, "success");
-			});
-		}).on('error', function(e) {
-			// console.log('getFile ' + e.message + URL + file.length);
-			callback && callback(URL, file, filePath, e.message);
+	protocol.get(data.URL, function (res) {
+		res.on('data', function (data) {
+			if ((res.statusCode >= 200 && res.statusCode < 300) || res.statusCode === 304) {
+				bufferArr.push(data);
+				bufferLen += data.length;
+			}
 		});
-	}
-	else {
-		callback && callback(URL, file, filePath, 'UnKnow');
-	}
+		res.on('end', function () {
+			file = Buffer.concat(bufferArr, bufferLen);
+			if (data.type === 'css') {
+				nextObj.setData({
+					fileData: file,
+					filePath: data.filePath + ' --> ' + data.URL,
+					encode: 'utf8'
+				});
+				nextObj.setBranch('isCss');
+			} else{
+				nextObj.setData({
+					fileName: data.URL,
+					fileData: file,
+					filePath: data.filePath,
+					status: status || 'success'
+				});
+			}			
+			nextObj.go();
+		});
+	}).on('error', function(e) {
+		status = e.message;
+	});
 }
 
 function logInit () {
+	// var nextObj = new createNextObj();
 	var item = htmlTemplate({
-		link: '图片链接',
+		URL: '图片链接',
 		size: '文件长度',
-		dir: '文件路径',
+		path: '文件路径',
 		status: '图片状态'
 	});
 	fs.writeFile(config.logPath, item, {encoding: 'utf8', flag: 'w'}, function (err) {
-		err && console.log(err);
+		if (err) {
+			console.log('%s %s', arguments.callee.name, err.message);
+		}
 		console.log('logInit Success');
+		// nextObj.go();
 	});
 }
 
@@ -172,25 +227,24 @@ function logInit () {
  * @param {String} filePath 文件目录
  * @param {String} status   文件状态
  */
-function setLog (URL, file, filePath, status) {
-
+function setLog (data) {
 	var item = htmlTemplate({
-		link: URL,
-		size: file.length,
-		dir: filePath,
-		status: status
+		URL: data.fileName,
+		size: data.fileData.length,
+		path: data.filePath,
+		status: data.status
 	});
-	// console.log(item);
-	if(file.length && file.length > 0){
+
+	if(data.fileData.length > 0){
 		fs.writeFile(config.logPath, item, {encoding: 'utf8', flag: 'a'}, function (err) {
 			if (err) {
-				console.log('setLog ' + err.message);
+				console.log('%s %s', arguments.callee.name, err.message);
 			}
 			else{
 				--counter;			//日志内容加1
 				console.log(counter + ' Saved! ' + item);
 				if(counter === 0) {
-					nextStep();
+					nextObj.go();
 				}
 			}
 		});
@@ -202,10 +256,11 @@ function setLog (URL, file, filePath, status) {
 
 function sortMax () {
 	fs.readFile(config.logPath, {encoding: 'utf8'}, function (err, data) {
-		var data = data.split('\r\n');
-		data[0] = '\ufeff' + data[0];
+		var sortedData;
+		data = data.split('\r\n');
+		data[0] = '\ufeff' + data[0];			//为xls兼容加BOM
 		data.pop();								//去结尾空行
-		data = data.sort(function (n1, n2) {
+		sortedData = data.sort(function (n1, n2) {
 			var n1 = +n1.split('\t')[1];
 				n2 = +n2.split('\t')[1];
 
@@ -215,76 +270,93 @@ function sortMax () {
 		}).join('\r\n');
 		fs.writeFile(config.logPath, data, {encoding: 'ucs2', flag: 'w+'}, function (err) {
 			if (err) {
-				console.log('sort ' + err.message);
+				console.log('%s %s', arguments.callee.name, err.message);
 			}
 			else{
 				console.log('sort done!');
-				nextStep();
+				nextObj.go();
 			}
 		});
 	});
 }
 
 function sendMail () {
-	var transporter = nodemailer.createTransport(config.mailConfig);
+	var transporter = nodemailer.createTransport(config.mailInfo);
 
 	transporter.sendMail({
-		from: config.mailConfig.auth.user,
+		from: config.mailInfo.auth.user,
 		to: config.mailTo,
-		subject: 'hello',
-		html: '<p style="color: red;">33333</p>',
+		subject: config.mailInfo.mailTo,
+		html: config.mailInfo.mailContentHTML,
 		attachments: [
 			{
 				path: config.logPath
 			}
 		]
 	},function () {
-		nextStep();
+		console.log('Mail Send!')
+		nextObj.go();
 	});
 }
 
 function htmlTemplate (data) {
-	// return '<tr><td>' + data.link + '</td><td>' + data.size + '</td><td>' + data.dir + '</td><td>' + data.status + '</td></tr>'
-	return data.link + '\t' + data.size + '\t' + data.dir + '\t' + data.status + '\r\n';
+	return data.URL + '\t' + data.size + '\t' + data.path + '\t' + data.status + '\r\n';
 }
 
-function nextStep (data, branch) {
-	var data = data || null,
-		name = arguments.callee.caller.name,
-		branch = branch || 'default';
+function init (data, branch) {
+	var nextObj = new createNextObj();
 
-	taskProcess[name][branch].apply(this, data)
+	nextObj.setData(data);
+	nextObj.setBranch(branch);
+	nextObj.go();
 }
 
-logInit();
+function exit () {
+	process.exit();
+}
 
-// getFromDictionary (config.folderPath, handleFile);		//以目录获取Log
-getFromListFile (config.urlPath, handleFile);		//以URL列表读取
+function createNextObj (myprocess) {
+	this.data = {};
+	this.branch = 'default';
+	this.from = arguments.callee.caller.name;
+	this.taskProcess = myprocess || taskProcess;
+}
+createNextObj.prototype.setData = function(data) {
+	this.data = data || {};
+};
+createNextObj.prototype.setBranch = function(branch) {
+	this.branch = branch || 'default';
+};
+createNextObj.prototype.go = function() {
+	var t = this;
+	console.log(t.from, t.branch, t.data);					//todo debug
+	t.taskProcess[t.from][t.branch].call(t, t.data);
+};
 
-// sortMax();
+logInit();			//todo 整合
 
 var taskProcess = {
 	'init': {
 		'isList': getFromListFile,
-		'isDirectory': getFromDictionary,
-		'default': getFromDictionary
+		'isDirectory': getFromDirectory,
+		'default': getFromDirectory
 	},
 	'getFromListFile': {
-		'default': handleFile
+		'default': urlAssign
 	},
-	'getFromDictionary': {
-		'default': handleFile
+	'getFromDirectory': {
+		'default': extractImageURL
 	},
-	'handleFile': {
-		'isCss': handleFile,
-		'default': imgFilter
+	'extractImageURL': {
+		'default': urlAssign
 	},
-	'imgFilter': {
+	'urlAssign': {
 		'isDataURL': setLog,
-		'isURL': getImg,
+		'isURL': getFile,
 		'default': setLog
 	},
-	'getImg': {
+	'getFile': {
+		'isCss': extractImageURL,
 		'default': setLog
 	},
 	'setLog': {
@@ -297,3 +369,8 @@ var taskProcess = {
 		'default': exit
 	}
 }
+
+
+// init(null, 'isList');
+init(null, 'isDirectory');
+

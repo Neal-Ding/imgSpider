@@ -3,15 +3,17 @@
 	"folderPath": "./cms",
 	"fileType": ".vm",
 	"logPath": "./log.xls",
-	"mailConfig": {
+	"mailInfo": {
 		"host": "smtp.alibaba-inc.com",
 		"secure": true,
 		"debug": true,
 		"auth": {
 			"user": "wb-dingxinghua@alibaba-inc.com",
 			"pass": ""
-		}
+		},
+		"mailTo": "wb-dingxinghua@alibaba-inc.com",
+		"mailSubject": "MyMail",
+		"mailContentHtml": "<p style='color: red;'>HTML code for Test.</p>"
 	},
-	"mailTo" :"wb-dingxinghua@alibaba-inc.com",
-	"time": 1
+	"runIntervalTime": 1
 }
