@@ -2,7 +2,6 @@ var https = require('https'),
 	http = require('http'),
 	path = require('path'),
 	fs = require('graceful-fs'),
-	util = require('util'),
 	iconv = require('iconv-lite'),
 	nodemailer = require('nodemailer'),
 	config = require('./config.json'),
@@ -19,9 +18,15 @@ function getFromDirectory (data) {
 	var nextObj = new createNextObj();
 	var directory = data.directory || config.folderPath;
 	fs.readdir(directory, function (err, file) {
-		file.forEach(function (t, idx) {
+		if (err) {
+			console.log('%s %s', nextObj.from, err.message);
+		}
+		file.forEach(function (t) {
 			var filePath = directory + '/' + t;
 			fs.stat(filePath, function (err, stats) {
+				if (err) {
+					console.log('%s %s', nextObj.from, err.message);
+				}
 				if (stats.isDirectory()) {
 					getFromDirectory({
 						directory: filePath
@@ -29,8 +34,8 @@ function getFromDirectory (data) {
 				}
 				else if(stats.isFile() && path.extname(t) === config.fileType){		//todo multiExtName
 					fs.readFile(filePath, function (err, data) {
-						if(err){
-							console.log(err);
+						if (err) {
+							console.log('%s %s', nextObj.from, err.message);
 						}
 						else{
 							nextObj.setData({
@@ -50,19 +55,20 @@ function getFromDirectory (data) {
 /**
  * 分析URL读取文件
  * @param  {[type]}   filePath 文件路径
- * @param  {Function} callback [description]
  */
 function getFromListFile (data) {
 	var nextObj = new createNextObj();
-	fs.readFile(config.urlPath, {encoding: 'utf8'}, function (err, data) {
+	var urlList = data.urlList || config.urlPath;
+	fs.readFile(urlList, {encoding: 'utf8'}, function (err, data) {
 		if (err) {
-			console.log(err);
+			console.log('%s %s', nextObj.from, err.message);
 		} else{
 			data.split('\r\n').forEach(function (t) {
 				nextObj.setData({
 					URL: t,
 					filePath: t,
-					encode: 'utf8'
+					encode: 'utf8',
+					type: 'html'
 				});
 				nextObj.go();
 			});
@@ -80,18 +86,13 @@ function getFromListFile (data) {
 function extractImageURL (data) {
 	var nextObj = new createNextObj();
 	var content = iconv.decode(data.fileData, data.encode);
-	var srcURL = content.match(/img src=(\"|\')(.+?)(\"|\')/gi) || [],
-		bgURL = content.match(/url\((.+?)\)/gi) || [],
-		cssURL = content.match(/href=[\"|\'](.+?)\.css[\"|\']/gi) || [];
+	var srcURL = content.match(/<img(.+?)src=[\"|'](\S*?)(?=[\"|'])/gi) || [],
+		bgURL = content.match(/(background|background-image)(\s*?):(.*?)url\((.+?)(?=[\"|']*?\))/gi) || [],
+		cssURL = content.match(/<link(.*?)href=[\"|'](.+?)\.css(?=[\"|'])/gi) || [];
 
 	bgURL.forEach(function (t) {
-		t = t.slice(4, -1).split(/[\"|\']/);
-		if(t[1]){
-			t = t[1];
-		}
-		else{
-			t = t[0];
-		}
+		console.log(t);
+		t = t.split(t.match(/url(\s)*?\((.*?)['|\"]*/)[0])[1];
 		++counter;			//日志内容加1
 		nextObj.setData({
 			URL: t,
@@ -100,7 +101,8 @@ function extractImageURL (data) {
 		nextObj.go();
 	});
 	srcURL.forEach(function (t) {
-		t = t.slice(9, -1);
+		console.log(t);
+		t = t.split(/src=[\"|']/)[1];
 		++counter;			//日志内容加1
 		nextObj.setData({
 			URL: t,
@@ -108,15 +110,15 @@ function extractImageURL (data) {
 		});
 		nextObj.go();
 	});
-	cssURL.forEach(function (t) {
-		t = t.slice(6, -1);
-		nextObj.setData({
-			URL: t,
-			filePath: data.filePath,
-			type: 'css'
-		});
-		nextObj.go();
-	});
+	// cssURL.forEach(function (t) {
+	// 	t = t.split(/href=[\"|']/)[1];
+	// 	nextObj.setData({
+	// 		URL: t,
+	// 		filePath: data.filePath,
+	// 		type: 'css'
+	// 	});
+	// 	nextObj.go();
+	// });
 }
 
 /**
@@ -126,9 +128,8 @@ function extractImageURL (data) {
  */
 function urlAssign (data) {
 	var nextObj = new createNextObj();
-	var	protocol = data.URL.match(/(https|http|data)(.?)\:/gi) || [''];
-
-	protocol = protocol[0].split(':')[0];
+	var	protocol = data.URL.match(/(https|http|data)(.*?)(?=\:)/gi) || [''];
+		protocol = protocol[0];
 
 	if(protocol === 'data') {		//统计dataURL有bug,前后引号一致
 		var fileName = data.URL.slice(0, 15) + '...' + data.URL.slice(-15);
@@ -188,6 +189,13 @@ function getFile (data) {
 					encode: 'utf8'
 				});
 				nextObj.setBranch('isCss');
+			} else if (data.type === 'html') {
+				nextObj.setData({
+					fileData: file,
+					filePath: data.URL,
+					encode: 'utf8'
+				});
+				nextObj.setBranch('isHTML');
 			} else{
 				nextObj.setData({
 					fileName: data.URL,
@@ -213,7 +221,7 @@ function logInit () {
 	});
 	fs.writeFile(config.logPath, item, {encoding: 'utf8', flag: 'w'}, function (err) {
 		if (err) {
-			console.log('%s %s', arguments.callee.name, err.message);
+			console.log('%s %s', nextObj.from, err.message);
 		}
 		console.log('logInit Success');
 		// nextObj.go();
@@ -228,6 +236,7 @@ function logInit () {
  * @param {String} status   文件状态
  */
 function setLog (data) {
+	var nextObj = new createNextObj();
 	var item = htmlTemplate({
 		URL: data.fileName,
 		size: data.fileData.length,
@@ -236,16 +245,17 @@ function setLog (data) {
 	});
 
 	if(data.fileData.length > 0){
+	// if(data.fileData.length > 0 || data.status !== 'UnKnow'){
 		fs.writeFile(config.logPath, item, {encoding: 'utf8', flag: 'a'}, function (err) {
+			--counter;			//日志内容加1
 			if (err) {
-				console.log('%s %s', arguments.callee.name, err.message);
+				console.log('%s %s', nextObj.from, err.message);
 			}
 			else{
-				--counter;			//日志内容加1
 				console.log(counter + ' Saved! ' + item);
-				if(counter === 0) {
-					nextObj.go();
-				}
+			}
+			if(counter === 0) {
+				nextObj.go();
 			}
 		});
 	}
@@ -255,22 +265,26 @@ function setLog (data) {
 }
 
 function sortMax () {
+	var nextObj = new createNextObj();
 	fs.readFile(config.logPath, {encoding: 'utf8'}, function (err, data) {
+		if (err) {
+			console.log('%s %s', nextObj.from, err.message);
+		}
 		var sortedData;
 		data = data.split('\r\n');
 		data[0] = '\ufeff' + data[0];			//为xls兼容加BOM
 		data.pop();								//去结尾空行
 		sortedData = data.sort(function (n1, n2) {
-			var n1 = +n1.split('\t')[1];
-				n2 = +n2.split('\t')[1];
+			n1 = +n1.split('\t')[1];
+			n2 = +n2.split('\t')[1];
 
-			if((isNaN(n1) || isNaN(n2)) == false){
+			if((isNaN(n1) || isNaN(n2)) === false){
 				return n2 - n1;
 			}
 		}).join('\r\n');
 		fs.writeFile(config.logPath, data, {encoding: 'ucs2', flag: 'w+'}, function (err) {
 			if (err) {
-				console.log('%s %s', arguments.callee.name, err.message);
+				console.log('%s %s', nextObj.from, err.message);
 			}
 			else{
 				console.log('sort done!');
@@ -281,6 +295,7 @@ function sortMax () {
 }
 
 function sendMail () {
+	var nextObj = new createNextObj();
 	var transporter = nodemailer.createTransport(config.mailInfo);
 
 	transporter.sendMail({
@@ -294,7 +309,7 @@ function sendMail () {
 			}
 		]
 	},function () {
-		console.log('Mail Send!')
+		console.log('Mail Send!');
 		nextObj.go();
 	});
 }
@@ -329,11 +344,9 @@ createNextObj.prototype.setBranch = function(branch) {
 };
 createNextObj.prototype.go = function() {
 	var t = this;
-	console.log(t.from, t.branch, t.data);					//todo debug
+	// console.log(t.from, t.branch, t.data);					//todo debug
 	t.taskProcess[t.from][t.branch].call(t, t.data);
 };
-
-logInit();			//todo 整合
 
 var taskProcess = {
 	'init': {
@@ -357,6 +370,7 @@ var taskProcess = {
 	},
 	'getFile': {
 		'isCss': extractImageURL,
+		'isHTML': extractImageURL,
 		'default': setLog
 	},
 	'setLog': {
@@ -368,9 +382,10 @@ var taskProcess = {
 	'sendMail': {
 		'default': exit
 	}
-}
+};
 
 
-// init(null, 'isList');
-init(null, 'isDirectory');
+logInit();			//todo 整合
+init(null, 'isList');
+// init(null, 'isDirectory');
 
