@@ -6,6 +6,7 @@ var https = require('https'),
 	nodemailer = require('nodemailer'),
 	config = require('./config.json'),
 	exec = require('child_process').exec,
+	supportFile = config.fileType.split('|'),
 	counter = 0;
 
 // 控制器流程
@@ -89,7 +90,7 @@ function getFromDirectory (data) {
 						directory: filePath
 					});
 				}
-				else if(stats.isFile() && path.extname(t) === config.fileType){		//todo multiExtName
+				else if(stats.isFile() && supportFile.indexOf(path.extname(t)) > -1){		//todo multiExtName
 					fs.readFile(filePath, function (err, data) {
 						if (err) {
 							console.log('%s %s', nextObj.from, err.message);
