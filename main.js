@@ -5,13 +5,70 @@ var https = require('https'),
 	iconv = require('iconv-lite'),
 	nodemailer = require('nodemailer'),
 	config = require('./config.json'),
+	exec = require('child_process').exec,
 	counter = 0;
+
+// 控制器流程
+var taskProcess = {
+	'init': {
+		'isList': getFromListFile,
+		'isDirectory': getFromDirectory,
+		'default': getFromDirectory
+	},
+	'getFromListFile': {
+		'default': urlAssign
+	},
+	'getFromDirectory': {
+		'default': extractImageURL
+	},
+	'extractImageURL': {
+		'default': urlAssign
+	},
+	'urlAssign': {
+		'isDataURL': setLog,
+		'isURL': getFile,
+		'default': setLog
+	},
+	'getFile': {
+		'isCss': extractImageURL,
+		'isHTML': extractImageURL,
+		'default': setLog
+	},
+	'setLog': {
+		'default': sortMax
+	},
+	'sortMax': {
+		'default': sendMail
+	},
+	'sendMail': {
+		'default': exit
+	}
+};
+
+// 控制器部分
+function createNextObj (myprocess) {
+	this.data = {};
+	this.branch = 'default';
+	this.from = arguments.callee.caller.name;
+	this.taskProcess = myprocess || taskProcess;
+}
+createNextObj.prototype.setData = function(data) {
+	this.data = data || {};
+};
+createNextObj.prototype.setBranch = function(branch) {
+	this.branch = branch || 'default';
+};
+createNextObj.prototype.go = function() {
+	var t = this;
+	// console.log(t.from, t.branch, t.data);					//debug switcher
+	t.taskProcess[t.from][t.branch].call(t, t.data);
+};
 
 /**
  * 遍历源文件夹并读取指定类型文件
  * @param  {String}   directory		源文件夹
  * @nData  {String}   fileData		文件内容
- * @nData  {String}   sourcePath	文件路径	
+ * @nData  {String}   sourcePath	文件路径
  * @nData  {String}   encode		文件编码
  */
 function getFromDirectory (data) {
@@ -87,11 +144,10 @@ function extractImageURL (data) {
 	var nextObj = new createNextObj();
 	var content = iconv.decode(data.fileData, data.encode);
 	var srcURL = content.match(/<img(.+?)src=[\"|'](\S*?)(?=[\"|'])/gi) || [],
-		bgURL = content.match(/(background|background-image)(\s*?):(.*?)url\((.+?)(?=[\"|']*?\))/gi) || [],
+		bgURL = content.match(/(background|background-image)(\s*?):(\s*?)url\((.+?)(?=[\"|']*?\))/gi) || [],
 		cssURL = content.match(/<link(.*?)href=[\"|'](.+?)\.css(?=[\"|'])/gi) || [];
 
 	bgURL.forEach(function (t) {
-		console.log(t);
 		t = t.split(t.match(/url(\s)*?\((.*?)['|\"]*/)[0])[1];
 		++counter;			//日志内容加1
 		nextObj.setData({
@@ -101,7 +157,6 @@ function extractImageURL (data) {
 		nextObj.go();
 	});
 	srcURL.forEach(function (t) {
-		console.log(t);
 		t = t.split(/src=[\"|']/)[1];
 		++counter;			//日志内容加1
 		nextObj.setData({
@@ -110,15 +165,15 @@ function extractImageURL (data) {
 		});
 		nextObj.go();
 	});
-	// cssURL.forEach(function (t) {
-	// 	t = t.split(/href=[\"|']/)[1];
-	// 	nextObj.setData({
-	// 		URL: t,
-	// 		filePath: data.filePath,
-	// 		type: 'css'
-	// 	});
-	// 	nextObj.go();
-	// });
+	cssURL.forEach(function (t) {
+		t = t.split(/href=[\"|']/)[1];
+		nextObj.setData({
+			URL: t,
+			filePath: data.filePath,
+			type: 'css'
+		});
+		nextObj.go();
+	});
 }
 
 /**
@@ -140,6 +195,7 @@ function urlAssign (data) {
 			status: 'success'
 		});
 		nextObj.setBranch('isDataURL');
+		nextObj.go();
 	}
 	else if(protocol.length > 0){
 		nextObj.setData({
@@ -149,8 +205,9 @@ function urlAssign (data) {
 			type: data.type
 		});
 		nextObj.setBranch('isURL');
+		nextObj.go();
 	}
-	else {
+	else if(!data.type){
 		nextObj.setData({
 			fileName: data.URL,
 			fileData: data.URL,
@@ -158,8 +215,8 @@ function urlAssign (data) {
 			status: 'UnKnow'
 		});
 		nextObj.setBranch('isDataURL');
+		nextObj.go();
 	}
-	nextObj.go();
 }
 
 function getFile (data) {
@@ -170,7 +227,7 @@ function getFile (data) {
 		protocol = data.protocol,
 		status;
 
-	protocol = (protocol === 'http') ? http : 
+	protocol = (protocol === 'http') ? http :
 		(protocol === 'https') ? https : null;
 
 	protocol.get(data.URL, function (res) {
@@ -201,14 +258,24 @@ function getFile (data) {
 					fileName: data.URL,
 					fileData: file,
 					filePath: data.filePath,
-					status: status || 'success'
+					status: 'success'
 				});
-			}			
+			}
 			nextObj.go();
 		});
 	}).on('error', function(e) {
-		status = e.message;
-	});
+		if(!data.type){
+			nextObj.setData({
+				fileName: data.URL,
+				fileData: file,
+				filePath: data.filePath,
+				status: 'error'
+			});
+			nextObj.go();
+		}
+	}).setTimeout(5000, function(){
+        this.socket.destroy();
+    });;
 }
 
 function logInit () {
@@ -221,7 +288,7 @@ function logInit () {
 	});
 	fs.writeFile(config.logPath, item, {encoding: 'utf8', flag: 'w'}, function (err) {
 		if (err) {
-			console.log('%s %s', nextObj.from, err.message);
+			console.log('%s %s', 'logInit', err.message);
 		}
 		console.log('logInit Success');
 		// nextObj.go();
@@ -243,9 +310,7 @@ function setLog (data) {
 		path: data.filePath,
 		status: data.status
 	});
-
-	if(data.fileData.length > 0){
-	// if(data.fileData.length > 0 || data.status !== 'UnKnow'){
+	if(data.fileData.length > 0 && data.status !== 'UnKnow'){
 		fs.writeFile(config.logPath, item, {encoding: 'utf8', flag: 'a'}, function (err) {
 			--counter;			//日志内容加1
 			if (err) {
@@ -261,6 +326,10 @@ function setLog (data) {
 	}
 	else{
 		--counter;			//日志内容加1
+		console.log(counter + ' not Saved! ' + item);
+		if(counter === 0) {
+			nextObj.go();
+		}
 	}
 }
 
@@ -282,7 +351,7 @@ function sortMax () {
 				return n2 - n1;
 			}
 		}).join('\r\n');
-		fs.writeFile(config.logPath, data, {encoding: 'ucs2', flag: 'w+'}, function (err) {
+		fs.writeFile(config.logPath, sortedData, {encoding: 'ucs2', flag: 'w+'}, function (err) {
 			if (err) {
 				console.log('%s %s', nextObj.from, err.message);
 			}
@@ -300,8 +369,8 @@ function sendMail () {
 
 	transporter.sendMail({
 		from: config.mailInfo.auth.user,
-		to: config.mailTo,
-		subject: config.mailInfo.mailTo,
+		to: config.mailInfo.mailTo,
+		subject: config.mailInfo.mailSubject,
 		html: config.mailInfo.mailContentHTML,
 		attachments: [
 			{
@@ -318,6 +387,10 @@ function htmlTemplate (data) {
 	return data.URL + '\t' + data.size + '\t' + data.path + '\t' + data.status + '\r\n';
 }
 
+function exit () {
+	process.exit();
+}
+
 function init (data, branch) {
 	var nextObj = new createNextObj();
 
@@ -326,66 +399,9 @@ function init (data, branch) {
 	nextObj.go();
 }
 
-function exit () {
-	process.exit();
-}
 
-function createNextObj (myprocess) {
-	this.data = {};
-	this.branch = 'default';
-	this.from = arguments.callee.caller.name;
-	this.taskProcess = myprocess || taskProcess;
-}
-createNextObj.prototype.setData = function(data) {
-	this.data = data || {};
-};
-createNextObj.prototype.setBranch = function(branch) {
-	this.branch = branch || 'default';
-};
-createNextObj.prototype.go = function() {
-	var t = this;
-	// console.log(t.from, t.branch, t.data);					//todo debug
-	t.taskProcess[t.from][t.branch].call(t, t.data);
-};
-
-var taskProcess = {
-	'init': {
-		'isList': getFromListFile,
-		'isDirectory': getFromDirectory,
-		'default': getFromDirectory
-	},
-	'getFromListFile': {
-		'default': urlAssign
-	},
-	'getFromDirectory': {
-		'default': extractImageURL
-	},
-	'extractImageURL': {
-		'default': urlAssign
-	},
-	'urlAssign': {
-		'isDataURL': setLog,
-		'isURL': getFile,
-		'default': setLog
-	},
-	'getFile': {
-		'isCss': extractImageURL,
-		'isHTML': extractImageURL,
-		'default': setLog
-	},
-	'setLog': {
-		'default': sortMax
-	},
-	'sortMax': {
-		'default': sendMail
-	},
-	'sendMail': {
-		'default': exit
-	}
-};
-
-
-logInit();			//todo 整合
-init(null, 'isList');
-// init(null, 'isDirectory');
-
+exec('svn update').on('exit', function (code) {
+	logInit();					//todo 整合
+	// init(null, 'isList');
+	init(null, 'isDirectory');
+});
