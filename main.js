@@ -410,3 +410,5 @@ exec('svn update').on('exit', function (err) {
 	// init(null, 'isList');
 	init(null, 'isDirectory');
 });
+
+//todo 关键词生成小报告
