@@ -270,13 +270,14 @@ function getFile (data) {
 				fileName: data.URL,
 				fileData: file,
 				filePath: data.filePath,
-				status: 'error'
+				status: status || e.code
 			});
 			nextObj.go();
 		}
 	}).setTimeout(config.imgTimeout, function(){
-        this.socket.destroy();
-    });;
+		status = 'timeout';
+		this.socket.destroy();
+	});
 }
 
 function logInit () {
@@ -311,7 +312,7 @@ function setLog (data) {
 		path: data.filePath,
 		status: data.status
 	});
-	if(data.fileData.length > 0 && data.status !== 'UnKnow'){
+	if(data.fileData.length > 0 || data.status !== 'UnKnow'){
 		fs.writeFile(config.logPath, item, {encoding: 'utf8', flag: 'a'}, function (err) {
 			--counter;			//日志内容加1
 			if (err) {
@@ -401,7 +402,10 @@ function init (data, branch) {
 }
 
 
-exec('svn update').on('exit', function (code) {
+exec('svn update').on('exit', function (err) {
+	if(err !== 0){
+		console.log('命令执行失败');
+	}
 	logInit();					//todo 整合
 	// init(null, 'isList');
 	init(null, 'isDirectory');
