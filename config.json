@@ -15,5 +15,7 @@
 		"mailSubject": "MyMail",
 		"mailContentHtml": "<p style='color: red;'>HTML code for Test.</p>"
 	},
-	"runIntervalTime": 1
+	"imgTimeout": 5000,
+	"runIntervalTime": 1,
+	"cmdMaxBuffer": 10240000
 }

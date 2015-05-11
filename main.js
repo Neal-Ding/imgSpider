@@ -273,7 +273,7 @@ function getFile (data) {
 			});
 			nextObj.go();
 		}
-	}).setTimeout(5000, function(){
+	}).setTimeout(config.imgTimeout, function(){
         this.socket.destroy();
     });;
 }
