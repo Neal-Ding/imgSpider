@@ -9,62 +9,6 @@ var https = require('https'),
 	supportFile = config.fileType.split('|'),
 	counter = 0;
 
-// 控制器流程
-var taskProcess = {
-	'init': {
-		'isList': getFromListFile,
-		'isDirectory': getFromDirectory,
-		'default': getFromDirectory
-	},
-	'getFromListFile': {
-		'default': urlAssign
-	},
-	'getFromDirectory': {
-		'default': extractImageURL
-	},
-	'extractImageURL': {
-		'default': urlAssign
-	},
-	'urlAssign': {
-		'isDataURL': setLog,
-		'isURL': getFile,
-		'default': setLog
-	},
-	'getFile': {
-		'isCss': extractImageURL,
-		'isHTML': extractImageURL,
-		'default': setLog
-	},
-	'setLog': {
-		'default': sortMax
-	},
-	'sortMax': {
-		'default': sendMail
-	},
-	'sendMail': {
-		'default': exit
-	}
-};
-
-// 控制器部分
-function createNextObj (myprocess) {
-	this.data = {};
-	this.branch = 'default';
-	this.from = arguments.callee.caller.name;
-	this.taskProcess = myprocess || taskProcess;
-}
-createNextObj.prototype.setData = function(data) {
-	this.data = data || {};
-};
-createNextObj.prototype.setBranch = function(branch) {
-	this.branch = branch || 'default';
-};
-createNextObj.prototype.go = function() {
-	var t = this;
-	// console.log(t.from, t.branch, t.data);					//debug switcher
-	t.taskProcess[t.from][t.branch].call(t, t.data);
-};
-
 /**
  * 遍历源文件夹并读取指定类型文件
  * @param  {String}   directory		源文件夹
@@ -125,7 +69,6 @@ function getFromListFile (data) {
 				nextObj.setData({
 					URL: t,
 					filePath: t,
-					encode: 'utf8',
 					type: 'html'
 				});
 				nextObj.go();
@@ -155,6 +98,7 @@ function extractImageURL (data) {
 			URL: t,
 			filePath: data.filePath
 		});
+		nextObj.setBranch('isBgURL');
 		nextObj.go();
 	});
 	srcURL.forEach(function (t) {
@@ -164,6 +108,7 @@ function extractImageURL (data) {
 			URL: t,
 			filePath: data.filePath
 		});
+		nextObj.setBranch('isSrcURL');
 		nextObj.go();
 	});
 	cssURL.forEach(function (t) {
@@ -173,18 +118,23 @@ function extractImageURL (data) {
 			filePath: data.filePath,
 			type: 'css'
 		});
+		nextObj.setBranch('isCssURL');
 		nextObj.go();
 	});
 }
 
 /**
  * 根据链接分发请求
- * @param  {String} URL	  文件链接
- * @param  {String} filePath 来自文件路径
+ * @param  {data}
+ *	{
+		URL: '传入链接',
+		filePath: '来自路径',
+		type: '文件类型' (仅非图片链接时需要赋值)
+	}
  */
 function urlAssign (data) {
 	var nextObj = new createNextObj();
-	var	protocol = data.URL.match(/(https|http|data)(.*?)(?=\:)/gi) || [''];
+	var	protocol = data.URL.match(/(https|http|data)(.*?)(?=\:)/gi) || [''];	//链接合法性验证
 		protocol = protocol[0];
 
 	if(protocol === 'data') {		//统计dataURL有bug,前后引号一致
@@ -198,7 +148,7 @@ function urlAssign (data) {
 		nextObj.setBranch('isDataURL');
 		nextObj.go();
 	}
-	else if(protocol.length > 0){
+	else if(protocol === 'http' || protocol === 'https'){
 		nextObj.setData({
 			protocol: protocol,
 			URL: data.URL,
@@ -208,18 +158,27 @@ function urlAssign (data) {
 		nextObj.setBranch('isURL');
 		nextObj.go();
 	}
-	else if(!data.type){
+	else if(!data.type){		//非法图片链接流程
 		nextObj.setData({
 			fileName: data.URL,
 			fileData: data.URL,
 			filePath: data.filePath,
 			status: 'UnKnow'
 		});
-		nextObj.setBranch('isDataURL');
+		nextObj.setBranch('notURL');
 		nextObj.go();
 	}
 }
 
+/**
+ * 获取文件内容
+ * @param  {data}
+ *	{
+		URL: '传入链接',
+		filePath: '来自路径',
+		type: '文件类型' (仅非图片链接时需要赋值)
+	}
+ */
 function getFile (data) {
 	var nextObj = new createNextObj();
 	var bufferArr = [],
@@ -261,6 +220,7 @@ function getFile (data) {
 					filePath: data.filePath,
 					status: 'success'
 				});
+				nextObj.setBranch('isImage');
 			}
 			nextObj.go();
 		});
@@ -270,8 +230,10 @@ function getFile (data) {
 				fileName: data.URL,
 				fileData: file,
 				filePath: data.filePath,
+				encode: 'utf8',
 				status: status || e.code
 			});
+			nextObj.setBranch('isError');
 			nextObj.go();
 		}
 	}).setTimeout(config.imgTimeout, function(){
@@ -318,9 +280,6 @@ function setLog (data) {
 			if (err) {
 				console.log('%s %s', nextObj.from, err.message);
 			}
-			else{
-				console.log(counter + ' Saved! ' + item);
-			}
 			if(counter === 0) {
 				nextObj.go();
 			}
@@ -328,7 +287,6 @@ function setLog (data) {
 	}
 	else{
 		--counter;			//日志内容加1
-		console.log(counter + ' not Saved! ' + item);
 		if(counter === 0) {
 			nextObj.go();
 		}
@@ -358,7 +316,6 @@ function sortMax () {
 				console.log('%s %s', nextObj.from, err.message);
 			}
 			else{
-				console.log('sort done!');
 				nextObj.go();
 			}
 		});
@@ -380,7 +337,6 @@ function sendMail () {
 			}
 		]
 	},function () {
-		console.log('Mail Send!');
 		nextObj.go();
 	});
 }
@@ -400,6 +356,142 @@ function init (data, branch) {
 	nextObj.setBranch(branch);
 	nextObj.go();
 }
+
+
+
+var taskProcess = {
+	'init': {
+		'isURLList': {
+			'name': getFromListFile,
+			'alias': '读取目标列表'
+		},
+		'isDirectory': {
+			'name': getFromDirectory,
+			'alias': '读取目标目录'
+		}
+	},
+	'getFromListFile': {
+		'default': {
+			'name': urlAssign,
+			'alias': '从URL列表中获取链接'
+		}
+	},
+	'getFromDirectory': {
+		'default': {
+			'name': extractImageURL,
+			'alias': '从目录中获取文件'
+		}
+	},
+	'extractImageURL': {
+		'isBgURL': {
+			'name': urlAssign,
+			'alias': '提取背景URL'
+		},
+		'isSrcURL': {
+			'name': urlAssign,
+			'alias': '提取资源URL'
+		},
+		'isCssURL': {
+			'name': urlAssign,
+			'alias': '提取样式表URL'
+		}
+	},
+	'urlAssign': {
+		'isDataURL': {
+			'name': setLog,
+			'alias': '链接中图片dataURL'
+		},
+		'isURL': {
+			'name': getFile,
+			'alias': '链接中图片外链URL'
+		},
+		"notURL": {
+			'name': setLog,
+			'alias': '链接中非外链URL'
+		}
+	},
+	'getFile': {
+		'isCss': {
+			'name': extractImageURL,
+			'alias': '文件内容中样式链接'
+		},
+		'isHTML': {
+			'name': extractImageURL,
+			'alias': '文件内容中页面链接'
+		},
+		'isImage': {
+			'name': setLog,
+			'alias': '文件内容中图片链接'
+		},
+		'isError': {
+			'name': setLog,
+			'alias': '文件内容获取出错'
+		}
+	},
+	'setLog': {
+		'default': {
+			'name': sortMax,
+			'alias': '写入日志文件'
+		}
+	},
+	'sortMax': {
+		'default': {
+			'name': sendMail,
+			'alias': '降序排列内容'
+		}
+	},
+	'sendMail': {
+		'default': {
+			'name': exit,
+			'alias': '发送邮件'
+		}
+	}
+};
+
+var fnStatistics = {};
+// 控制器对象
+function createNextObj (myprocess) {
+	this.data = {};
+	this.branch = 'default';
+	this.from = arguments.callee.caller.name;
+	this.taskProcess = myprocess || taskProcess;
+}
+createNextObj.prototype.setData = function(data) {
+	this.data = data || {};
+};
+createNextObj.prototype.setBranch = function(branch) {
+	this.branch = branch || 'default';
+};
+createNextObj.prototype.go = function() {
+	var t = this;
+
+	t.clearLog();
+	t.setLog();
+	try {
+		t.taskProcess[t.from][t.branch]['name'].call(t, t.data);
+	} catch(e) {
+		t.setLog();
+		console.log(t.from, t.branch, t.data);			//出错时提示debug信息
+	}
+};
+createNextObj.prototype.setLog = function() {
+	var tInfo = this.taskProcess[this.from][this.branch];
+
+	if (fnStatistics[tInfo.alias] === undefined) {
+		fnStatistics[tInfo.alias] = 0;
+	}
+	fnStatistics[tInfo.alias]++;
+
+	for (var i in fnStatistics) {
+		if (fnStatistics.hasOwnProperty(i)) {
+			process.stdout.write( i + ': ' + fnStatistics[i] + '\n');
+		}
+	}
+};
+createNextObj.prototype.clearLog = function() {
+	process.stdout.clearScreenDown();
+	process.stdout.cursorTo(0, 0);
+};
 
 
 exec('svn update').on('exit', function (err) {
