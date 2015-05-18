@@ -33,6 +33,7 @@ cms/
 url.*
 *.xls
 *.zip
+log
 
 # Files that might appear on external disk
 .Spotlight-V100

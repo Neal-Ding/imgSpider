@@ -9,6 +9,8 @@ var https = require('https'),
 	supportFile = config.fileType.split('|'),
 	counter = 0;
 
+var resultLog = [];
+
 /**
  * 遍历源文件夹并读取指定类型文件
  * @param  {String}   directory		源文件夹
@@ -242,23 +244,6 @@ function getFile (data) {
 	});
 }
 
-function logInit () {
-	// var nextObj = new createNextObj();
-	var item = htmlTemplate({
-		URL: '图片链接',
-		size: '文件长度',
-		path: '文件路径',
-		status: '图片状态'
-	});
-	fs.writeFile(config.logPath, item, {encoding: 'utf8', flag: 'w'}, function (err) {
-		if (err) {
-			console.log('%s %s', 'logInit', err.message);
-		}
-		console.log('logInit Success');
-		// nextObj.go();
-	});
-}
-
 /**
  * 输出日志
  * @param {String} URL	  文件链接
@@ -268,50 +253,26 @@ function logInit () {
  */
 function setLog (data) {
 	var nextObj = new createNextObj();
-	var item = htmlTemplate({
+	var item = {
 		URL: data.fileName,
 		size: data.fileData.length,
 		path: data.filePath,
 		status: data.status
-	});
-	if(data.fileData.length > 0 || data.status !== 'UnKnow'){
-		fs.writeFile(config.logPath, item, {encoding: 'utf8', flag: 'a'}, function (err) {
-			--counter;			//日志内容加1
-			if (err) {
-				console.log('%s %s', nextObj.from, err.message);
-			}
-			if(counter === 0) {
-				nextObj.go();
-			}
-		});
-	}
-	else{
-		--counter;			//日志内容加1
-		if(counter === 0) {
-			nextObj.go();
-		}
-	}
-}
+	};
+	resultLog.push(item);
 
-function sortMax () {
-	var nextObj = new createNextObj();
-	fs.readFile(config.logPath, {encoding: 'utf8'}, function (err, data) {
-		if (err) {
-			console.log('%s %s', nextObj.from, err.message);
-		}
-		var sortedData;
-		data = data.split('\r\n');
-		data[0] = '\ufeff' + data[0];			//为xls兼容加BOM
-		data.pop();								//去结尾空行
-		sortedData = data.sort(function (n1, n2) {
-			n1 = +n1.split('\t')[1];
-			n2 = +n2.split('\t')[1];
+	--counter;			//日志序列减1
+	if(counter === 0) {
+		resultLog = resultLog.sort(function (n1, n2) {
+			n1 = +n1.size;
+			n2 = +n2.size;
 
 			if((isNaN(n1) || isNaN(n2)) === false){
 				return n2 - n1;
 			}
-		}).join('\r\n');
-		fs.writeFile(config.logPath, sortedData, {encoding: 'ucs2', flag: 'w+'}, function (err) {
+		});
+
+		fs.writeFile(config.logPath, JSON.stringify(resultLog), {encoding: 'utf8', flag: 'w'}, function (err) {
 			if (err) {
 				console.log('%s %s', nextObj.from, err.message);
 			}
@@ -319,6 +280,33 @@ function sortMax () {
 				nextObj.go();
 			}
 		});
+	}
+}
+
+function setXLS () {
+	var nextObj = new createNextObj();
+
+	var xlsData = resultLog.map(function (t) {
+		if(t.size > 0 || t.status !== 'UnKnow'){
+			return htmlTemplate(t);
+		}
+	});
+	xlsData.unshift(htmlTemplate({				//插入表头
+		URL: '图片链接',
+		size: '文件长度',
+		path: '文件路径',
+		status: '图片状态'
+	}));
+	xlsData[0] = '\ufeff' + xlsData[0];			//为xls兼容加BOM
+
+	// console.log(xlsData);
+	fs.writeFile(config.mailLogPath, xlsData.join('\r\n'), {encoding: 'ucs2', flag: 'w+'}, function (err) {
+		if (err) {
+			console.log('%s %s', nextObj.from, err.message);
+		}
+		else{
+			nextObj.go();
+		}
 	});
 }
 
@@ -333,7 +321,7 @@ function sendMail () {
 		html: config.mailInfo.mailContentHTML,
 		attachments: [
 			{
-				path: config.logPath
+				path: config.mailLogPath
 			}
 		]
 	},function () {
@@ -342,7 +330,7 @@ function sendMail () {
 }
 
 function htmlTemplate (data) {
-	return data.URL + '\t' + data.size + '\t' + data.path + '\t' + data.status + '\r\n';
+	return data.URL + '\t' + data.size + '\t' + data.path + '\t' + data.status;
 }
 
 function exit () {
@@ -356,8 +344,6 @@ function init (data, branch) {
 	nextObj.setBranch(branch);
 	nextObj.go();
 }
-
-
 
 var taskProcess = {
 	'init': {
@@ -430,11 +416,11 @@ var taskProcess = {
 	},
 	'setLog': {
 		'default': {
-			'name': sortMax,
+			'name': setXLS,
 			'alias': '写入日志文件'
 		}
 	},
-	'sortMax': {
+	'setXLS': {
 		'default': {
 			'name': sendMail,
 			'alias': '降序排列内容'
@@ -466,15 +452,15 @@ createNextObj.prototype.go = function() {
 	var t = this;
 
 	t.clearLog();
-	t.setLog();
+	t.printLog();
 	try {
 		t.taskProcess[t.from][t.branch]['name'].call(t, t.data);
 	} catch(e) {
-		t.setLog();
+		t.printLog();
 		console.log(t.from, t.branch, t.data);			//出错时提示debug信息
 	}
 };
-createNextObj.prototype.setLog = function() {
+createNextObj.prototype.printLog = function() {
 	var tInfo = this.taskProcess[this.from][this.branch];
 
 	if (fnStatistics[tInfo.alias] === undefined) {
@@ -493,13 +479,11 @@ createNextObj.prototype.clearLog = function() {
 	process.stdout.cursorTo(0, 0);
 };
 
-
 exec('svn update').on('exit', function (err) {
 	if(err !== 0){
 		console.log('命令执行失败');
 	}
-	logInit();					//todo 整合
-	// init(null, 'isList');
+	// init(null, 'isURLList');
 	init(null, 'isDirectory');
 });
 
